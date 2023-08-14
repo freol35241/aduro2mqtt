@@ -1,0 +1,4 @@
+paho-mqtt==1.6.1
+pyduro==3.2.1
+environs==9.5.0
+parse==1.19.0
