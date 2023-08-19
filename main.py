@@ -3,6 +3,7 @@ import json
 import time
 import logging
 import warnings
+from threading import Lock
 
 from pyduro.actions import (
     get as pyduro_get,
@@ -45,6 +46,9 @@ mq = MQTT(client_id=MQTT_CLIENT_ID)
 mq.username_pw_set(MQTT_USER, MQTT_PASSWORD)
 
 mq.enable_logger(logging.getLogger("aduro2mqtt.mqtt"))
+
+# Pyduro is NOT Thread-safe, we need to handle this explicitly
+PYDURO_LOCK = Lock()
 
 
 @mq.connect_callback()
@@ -92,13 +96,14 @@ def _handler(client, userdata, message):  # pylint: disable=unused-argument
         return
 
     # pylint: disable=redefined-outer-name
-    if response := pyduro_set.run(ADURO_HOST, ADURO_SERIAL, ADURO_PIN, path, value):
-        payload = response.parse_payload()
-        LOGGER.debug("Received response with payload: %s", payload)
-        if response.status:
-            LOGGER.error(
-                "Received non-zero status code from burner: %d", response.status
-            )
+    with PYDURO_LOCK:
+        if response := pyduro_set.run(ADURO_HOST, ADURO_SERIAL, ADURO_PIN, path, value):
+            payload = response.parse_payload()
+            LOGGER.debug("Received response with payload: %s", payload)
+            if response.status:
+                LOGGER.error(
+                    "Received non-zero status code from burner: %d", response.status
+                )
 
 
 # Connect to broker
@@ -110,73 +115,88 @@ mq.connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT)
 LOGGER.info("Starting background mqtt thread...")
 mq.loop_start()
 
+def _try_floatify_values(dikt: dict):
+    for k, v in dikt.items():
+        try:
+            dikt[k] = float(v)
+        except ValueError:
+            pass
+
 
 # Now, continuously poll the Aduro pellet burner for data and publish to the mqtt broker
 while True:
     t0 = time.time()
     # status '*'
     try:
-        if response := pyduro_raw.run(
-            burner_address=ADURO_HOST,
-            serial=ADURO_SERIAL,
-            pin_code=ADURO_PIN,
-            function_id=11,
-            payload="*",
-        ):
-            status = response.parse_payload().split(",")
-            dikt = {key: status[ix] for ix, key in enumerate(STATUS_PARAMS.keys())}
-            mq.publish(f"{MQTT_BASE_TOPIC}/status", json.dumps(dikt))
+        with PYDURO_LOCK:
+            if response := pyduro_raw.run(
+                burner_address=ADURO_HOST,
+                serial=ADURO_SERIAL,
+                pin_code=ADURO_PIN,
+                function_id=11,
+                payload="*",
+            ):
+                status = response.parse_payload().split(",")
+                dikt = {key: status[ix] for ix, key in enumerate(STATUS_PARAMS.keys())}
+                _try_floatify_values(dikt)
+                mq.publish(f"{MQTT_BASE_TOPIC}/status", json.dumps(dikt, sort_keys=True))
 
-        else:
-            LOGGER.error("response was None from query: 'status'")
+            else:
+                LOGGER.error("response was None from query: 'status'")
     except Exception:  # pylint: disable=broad-exception-caught
         LOGGER.exception("Function 'status' failed!")
 
     # get 'settings'
     for setting in SETTINGS:
         try:
-            if response := pyduro_get.run(
-                burner_address=ADURO_HOST,
-                serial=ADURO_SERIAL,
-                pin_code=ADURO_PIN,
-                function_name="settings",
-                path=f"{setting}.*",
-            ):
-                dikt = response.parse_payload()
-                mq.publish(
-                    f"{MQTT_BASE_TOPIC}/settings/{setting}",
-                    json.dumps(dikt, sort_keys=True),
-                )
+            with PYDURO_LOCK:
+                if response := pyduro_get.run(
+                    burner_address=ADURO_HOST,
+                    serial=ADURO_SERIAL,
+                    pin_code=ADURO_PIN,
+                    function_name="settings",
+                    path=f"{setting}.*",
+                ):
+                    dikt = response.parse_payload()
+                    _try_floatify_values(dikt)
+                    mq.publish(
+                        f"{MQTT_BASE_TOPIC}/settings/{setting}",
+                        json.dumps(dikt, sort_keys=True),
+                    )
 
         except Exception:  # pylint: disable=broad-exception-caught
             LOGGER.exception("Function: 'settings', path: %s", setting)
 
     # get 'operating'
     try:
-        if response := pyduro_get.run(
-            burner_address=ADURO_HOST,
-            serial=ADURO_SERIAL,
-            pin_code=ADURO_PIN,
-            function_name="operating",
-            path="*",
-        ):
-            dikt = response.parse_payload()
-            mq.publish(f"{MQTT_BASE_TOPIC}/operating", json.dumps(dikt, sort_keys=True))
+        with PYDURO_LOCK:
+            if response := pyduro_get.run(
+                burner_address=ADURO_HOST,
+                serial=ADURO_SERIAL,
+                pin_code=ADURO_PIN,
+                function_name="operating",
+                path="*",
+            ):
+                dikt = response.parse_payload()
+                _try_floatify_values(dikt)
+                mq.publish(f"{MQTT_BASE_TOPIC}/operating", json.dumps(dikt, sort_keys=True))
 
     except Exception:  # pylint: disable=broad-exception-caught
         LOGGER.exception("Function: 'operating', path: '*'")
 
     # get 'advanced'
     try:
-        if response := pyduro_get.run(
-            burner_address=ADURO_HOST,
-            serial=ADURO_SERIAL,
-            pin_code=ADURO_PIN,
-            function_name="advanced",
-            path="*",
-        ):
-            dikt = response.parse_payload()
-            mq.publish(f"{MQTT_BASE_TOPIC}/advanced", json.dumps(dikt, sort_keys=True))
+        with PYDURO_LOCK:
+            if response := pyduro_get.run(
+                burner_address=ADURO_HOST,
+                serial=ADURO_SERIAL,
+                pin_code=ADURO_PIN,
+                function_name="advanced",
+                path="*",
+            ):
+                dikt = response.parse_payload()
+                _try_floatify_values(dikt)
+                mq.publish(f"{MQTT_BASE_TOPIC}/advanced", json.dumps(dikt, sort_keys=True))
 
     except Exception:  # pylint: disable=broad-exception-caught
         LOGGER.exception("Function: 'advanced', path: ''")
@@ -184,33 +204,36 @@ while True:
     # get 'consumption'
     for key in CONSUMPTION_DATA:
         try:
-            if response := pyduro_get.run(
-                burner_address=ADURO_HOST,
-                serial=ADURO_SERIAL,
-                pin_code=ADURO_PIN,
-                function_name="consumption",
-                path=key,
-            ):
-                data = response.parse_payload().split("=")[-1].split(",")
-                mq.publish(
-                    f"{MQTT_BASE_TOPIC}/consumption/{key}",
-                    json.dumps(data, sort_keys=True),
-                )
+            with PYDURO_LOCK:
+                if response := pyduro_get.run(
+                    burner_address=ADURO_HOST,
+                    serial=ADURO_SERIAL,
+                    pin_code=ADURO_PIN,
+                    function_name="consumption",
+                    path=key,
+                ):
+                    data = response.parse_payload().split("=")[-1].split(",")
+                    data = [float(value) for value in data]
+                    mq.publish(
+                        f"{MQTT_BASE_TOPIC}/consumption/{key}",
+                        json.dumps(data, sort_keys=True),
+                    )
 
         except Exception:  # pylint: disable=broad-exception-caught
             LOGGER.exception("Function: 'settings', path: %s", key)
 
     # get 'logs'
     try:
-        if response := pyduro_get.run(
-            burner_address=ADURO_HOST,
-            serial=ADURO_SERIAL,
-            pin_code=ADURO_PIN,
-            function_name="logs",
-            path="",
-        ):
-            dikt = response.parse_payload()
-            mq.publish(f"{MQTT_BASE_TOPIC}/logs", json.dumps(dikt, sort_keys=True))
+        with PYDURO_LOCK:
+            if response := pyduro_get.run(
+                burner_address=ADURO_HOST,
+                serial=ADURO_SERIAL,
+                pin_code=ADURO_PIN,
+                function_name="logs",
+                path="",
+            ):
+                dikt = response.parse_payload()
+                mq.publish(f"{MQTT_BASE_TOPIC}/logs", json.dumps(dikt, sort_keys=True))
 
     except Exception:  # pylint: disable=broad-exception-caught
         LOGGER.exception("Function: 'logs', path: ''")
