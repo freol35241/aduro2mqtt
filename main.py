@@ -63,7 +63,7 @@ def _on_connect(
 
 @mq.disconnect_callback()
 def _on_disconnect(
-    client, userdata, flags, reason_code, props=None
+    client, userdata, reason_code, props=None
 ):  # pylint: disable=unused-argument
     """Subscribe on connect"""
     if reason_code != 0:
