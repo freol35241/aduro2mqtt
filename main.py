@@ -115,6 +115,7 @@ mq.connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT)
 LOGGER.info("Starting background mqtt thread...")
 mq.loop_start()
 
+
 def _try_floatify_values(dikt: dict):
     for k, v in dikt.items():
         try:
@@ -139,7 +140,9 @@ while True:
                 status = response.parse_payload().split(",")
                 dikt = {key: status[ix] for ix, key in enumerate(STATUS_PARAMS.keys())}
                 _try_floatify_values(dikt)
-                mq.publish(f"{MQTT_BASE_TOPIC}/status", json.dumps(dikt, sort_keys=True))
+                mq.publish(
+                    f"{MQTT_BASE_TOPIC}/status", json.dumps(dikt, sort_keys=True)
+                )
 
             else:
                 LOGGER.error("response was None from query: 'status'")
@@ -179,7 +182,9 @@ while True:
             ):
                 dikt = response.parse_payload()
                 _try_floatify_values(dikt)
-                mq.publish(f"{MQTT_BASE_TOPIC}/operating", json.dumps(dikt, sort_keys=True))
+                mq.publish(
+                    f"{MQTT_BASE_TOPIC}/operating", json.dumps(dikt, sort_keys=True)
+                )
 
     except Exception:  # pylint: disable=broad-exception-caught
         LOGGER.exception("Function: 'operating', path: '*'")
@@ -196,7 +201,9 @@ while True:
             ):
                 dikt = response.parse_payload()
                 _try_floatify_values(dikt)
-                mq.publish(f"{MQTT_BASE_TOPIC}/advanced", json.dumps(dikt, sort_keys=True))
+                mq.publish(
+                    f"{MQTT_BASE_TOPIC}/advanced", json.dumps(dikt, sort_keys=True)
+                )
 
     except Exception:  # pylint: disable=broad-exception-caught
         LOGGER.exception("Function: 'advanced', path: ''")
