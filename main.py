@@ -116,7 +116,8 @@ LOGGER.info("Starting background mqtt thread...")
 mq.loop_start()
 
 
-def _try_floatify_values(dikt: dict):
+def _try_floatify_values(dikt: dict):  # pylint: disable=redefined-outer-name
+    # pylint: disable=invalid-name
     for k, v in dikt.items():
         try:
             dikt[k] = float(v)
