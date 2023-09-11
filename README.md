@@ -52,3 +52,44 @@ ADURO_POLL_INTERVAL
 LOG_LEVEL
     Logging level of the application. Optional, defaults to WARNING.
 ```
+
+## Integration to Home Assistant
+`aduro2mqtt` does not provide logic to take part in MQTT Discovery (https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) and, therefore, integration towards Home Assistant must be done through manual setup of mqtt sensors and switches. A basic example of a yaml configuration is shown below.
+
+```yaml
+mqtt:
+  sensor:
+  - name: "Aduro H2 Smoke temperature"
+    state_topic: "aduro2mqtt/status"
+    value_template: "{{ value_json.smoke_temp }}"
+    unit_of_measurement: "°C"
+  - name: "Aduro H2 Shaft temperature"
+    state_topic: "aduro2mqtt/status"
+    value_template: "{{ value_json.shaft_temp }}"
+    unit_of_measurement: "°C"
+  - name: "Aduro H2 Total hours"
+    state_topic: "aduro2mqtt/consumption/counter"
+    value_template: "{{ value_json[0] }}"
+    unit_of_measurement: "h"
+  - name: "Aduro H2 Room temperature"
+    state_topic: "aduro2mqtt/status"
+    value_template: "{{ value_json.boiler_temp }}"
+    unit_of_measurement: "°C"
+  
+  switch:
+  - name: "Aduro H2 toggle"
+    command_topic: "aduro2mqtt/set"
+    payload_on: '{"path": "misc.start", "value": "1"}'
+    payload_off: '{"path": "misc.stop", "value": "1"}'
+  
+  select:
+  - name: "Aduro H2 Fixed power (%)"
+    command_topic: "aduro2mqtt/set"
+    options:
+      - "10"
+      - "50"
+      - "100"
+    command_template: '{"path": "regulation.fixed_power", "value": {{ value}} }'
+    state_topic: "aduro2mqtt/settings/regulation"
+    value_template: "{{ value_json.fixed_power | int }}"
+```
